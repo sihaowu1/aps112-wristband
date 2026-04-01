@@ -93,15 +93,18 @@ per-column training-set means before XGBoost training; the same means are stored
 
 ## Feature Extraction
 
-21 features are computed per 20-second window:
+26 features are computed per 20-second window:
 
 | Group | Features |
 |-------|----------|
-| EDA (4)  | `eda_mean`, `eda_std`, `eda_slope`, `eda_range` |
-| HR (4)   | `hr_mean`, `hr_std`, `hr_min`, `hr_max` |
-| IBI (5)  | `ibi_mean`, `ibi_std`, `ibi_rmssd`, `ibi_sdnn`, `ibi_pnn50` |
+| EDA (7)  | `eda_mean`, `eda_std`, `eda_slope`, `eda_range`, `eda_scr_count`, `eda_deriv_mean`, `eda_delta` |
+| HR (5)   | `hr_mean`, `hr_std`, `hr_min`, `hr_max`, `hr_delta` |
+| IBI (8)  | `ibi_mean`, `ibi_std`, `ibi_rmssd`, `ibi_sdnn`, `ibi_pnn50`, `ibi_lf_power`, `ibi_hf_power`, `ibi_lf_hf_ratio` |
 | ACC (6)  | `acc_mag_mean`, `acc_mag_std`, `acc_var_x`, `acc_var_y`, `acc_var_z`, `acc_mean_jerk` |
-| TEMP (2) | `temp_mean`, `temp_slope` |
+
+`eda_deriv_mean` and `eda_delta` capture EDA rate-of-change and within-window trend;
+`hr_delta` captures heart-rate acceleration within the window. These transition features
+help detect stress onset rather than just absolute levels.
 
 ---
 
@@ -111,9 +114,8 @@ per-column training-set means before XGBoost training; the same means are stored
 - **Ratio**: approximately 70 % train / 30 % test
 - **Stratification**: V1 and V2 subjects are split independently so both protocol
   versions are represented in both partitions
-- **Class imbalance**: training windows are balanced with **SMOTE** (imbalanced-learn)
-  after NaN imputation; XGBoost is then trained with `scale_pos_weight = 1.0` because
-  the resampled training set is class-balanced
+- **Class imbalance**: handled natively by XGBoost via `scale_pos_weight = n_rest / n_stress`
+  (no synthetic oversampling)
 
 ---
 
@@ -129,12 +131,28 @@ Single XGBoost binary classifier (`binary:logistic`):
 | `subsample` | 0.8 |
 | `colsample_bytree` | 0.8 |
 | `min_child_weight` | 5 |
-| `scale_pos_weight` | 1.0 (after SMOTE balancing) |
-| Decision threshold | 0.5 |
+| `scale_pos_weight` | n_rest / n_stress (~3.6) |
+| Decision threshold | 0.255 (optimized via subject-wise 3-fold CV) |
 
-Training pipeline: impute NaNs → SMOTE → XGBoost.
+Training pipeline: impute NaNs → XGBoost → threshold optimization.
 
 No baseline model. No model comparison.
+
+---
+
+## Performance (held-out test set)
+
+Subject-wise 70/30 split — test subjects have **no windows in the training set**.
+
+| Metric | Value |
+|--------|-------|
+| **Accuracy** | 81.5 % |
+| **Sensitivity** (recall for stress/vibrate) | 73.2 % |
+| **Specificity** (recall for rest/no vibrate) | 83.8 % |
+| **Precision** (stress/vibrate) | 55.5 % |
+| **Processing time** | 34 ms |
+
+Test set: 1 504 windows (325 stress, 1 179 rest) from 10 held-out subjects.
 
 ---
 
@@ -149,7 +167,7 @@ Install dependencies from the project root:
 pip install -r requirements.txt
 ```
 
-Core packages: `numpy`, `scipy`, `scikit-learn`, `imbalanced-learn` (SMOTE), `xgboost`.
+Core packages: `numpy`, `scipy`, `scikit-learn`, `xgboost`.
 For the local web UI (`serve.py`): `fastapi`, `uvicorn`, `python-multipart` (also listed in `requirements.txt`).
 
 ### Training and evaluation (combined)

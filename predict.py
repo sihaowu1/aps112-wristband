@@ -107,9 +107,9 @@ def main():
         subj = load_subject(subject_dir, subject_id)
 
     print(f"Loading model from: {args.output_dir}")
-    model, col_means, _profiles = load_trained_model(args.output_dir)
+    model, col_means, threshold, _profiles = load_trained_model(args.output_dir)
 
-    out = predict_stress_window(model, col_means, subj, args.t_start, args.t_end)
+    out = predict_stress_window(model, col_means, subj, args.t_start, args.t_end, threshold)
 
     print()
     print("=" * 50)

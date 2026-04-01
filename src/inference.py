@@ -126,7 +126,7 @@ def _compute_baseline_means(baseline_eda, baseline_hr, baseline_acc):
 def predict_one(model, col_means, profiles,
                 eda, hr, acc_xyz, ibi_vals,
                 baseline_eda, baseline_hr, baseline_acc,
-                gender="m", activity="Yes", n_mc=30):
+                gender="m", activity="Yes", n_mc=30, threshold=0.5):
     """
     Classify a single point-in-time reading.
 
@@ -157,7 +157,7 @@ def predict_one(model, col_means, profiles,
     d = xgb.DMatrix(all_z_imp, feature_names=FEATURE_NAMES)
     probs = model.predict(d)
     prob = float(sum(probs) / len(probs))
-    pred = 1 if prob >= 0.5 else 0
+    pred = 1 if prob >= threshold else 0
 
     return {
         "prediction": pred,
@@ -172,7 +172,7 @@ def simulate_stress_detection(model, col_means, profiles,
                                eda, hr, acc_xyz, ibi_vals,
                                baseline_eda, baseline_hr, baseline_acc,
                                gender="m", activity="Yes",
-                               n_sim=60, noise=0.07):
+                               n_sim=60, noise=0.07, threshold=0.5):
     """
     Simulate n_sim stress windows (around current readings) and n_sim rest windows
     (around baseline readings), run through the model, and return a confusion matrix.
@@ -198,7 +198,7 @@ def simulate_stress_detection(model, col_means, profiles,
             z_imp = _apply_means([z], col_means)[0]
             d = xgb.DMatrix([z_imp], feature_names=FEATURE_NAMES)
             prob = float(model.predict(d)[0])
-            pairs.append((1 if prob >= 0.5 else 0, true_label))
+            pairs.append((1 if prob >= threshold else 0, true_label))
 
     tp = sum(1 for p, t in pairs if p == 1 and t == 1)
     tn = sum(1 for p, t in pairs if p == 0 and t == 0)
@@ -225,22 +225,22 @@ def simulate_stress_detection(model, col_means, profiles,
 
 def load_trained_model(output_dir):
     """
-    Load the trained XGBoost model, imputation means, and (optionally)
+    Load the trained XGBoost model, imputation means, threshold, and (optionally)
     subject profiles from the output directory.
 
-    Returns (model, col_means, profiles).
+    Returns (model, col_means, threshold, profiles).
     profiles is None when subject_profiles.json is absent.
     """
     model_path = os.path.join(output_dir, "model.json")
     meta_path = os.path.join(output_dir, "model_meta.json")
-    model, col_means = load_model(model_path, meta_path)
+    model, col_means, threshold = load_model(model_path, meta_path)
 
     profiles_path = os.path.join(output_dir, "subject_profiles.json")
     profiles = None
     if os.path.isfile(profiles_path):
         with open(profiles_path) as f:
             profiles = json.load(f)
-    return model, col_means, profiles
+    return model, col_means, threshold, profiles
 
 
 _FALLBACK_PROFILES = {
@@ -260,7 +260,7 @@ def get_profiles_or_fallback(profiles):
 # full-session window prediction (used by predict.py / old serve.py)
 # ---------------------------------------------------------------------------
 
-def predict_stress_window(model, col_means, subj, t_start, t_end):
+def predict_stress_window(model, col_means, subj, t_start, t_end, threshold=0.5):
     """
     Predict stress for a single [t_start, t_end] window from a loaded session.
 
@@ -271,7 +271,7 @@ def predict_stress_window(model, col_means, subj, t_start, t_end):
     z_imp = _apply_means([z], col_means)[0]
     d = xgb.DMatrix([z_imp], feature_names=FEATURE_NAMES)
     prob = float(model.predict(d)[0])
-    pred = 1 if prob >= 0.5 else 0
+    pred = 1 if prob >= threshold else 0
     return {
         "pred_prob": round(prob, 4),
         "pred_class": "stress" if pred == 1 else "rest",

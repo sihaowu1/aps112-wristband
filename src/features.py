@@ -5,14 +5,14 @@ Window parameters:
   Window size : 20 seconds  (fits within short 28-37s stress tasks)
   Step size   : 10 seconds  (50% overlap)
 
-Features extracted per window (23 total) — restricted to sensors present in Design 1:
+Features extracted per window (26 total) — restricted to sensors present in Design 1:
   Design 1 hardware: EDA sensor (wristband), PPG sensor (upper-arm module), 6-axis IMU (wristband).
   Skin temperature is NOT a Design 1 sensor and is therefore excluded.
 
   EDA  (4 Hz, 80 samples/window):
-    eda_mean, eda_std, eda_slope, eda_range, eda_scr_count
+    eda_mean, eda_std, eda_slope, eda_range, eda_scr_count, eda_deriv_mean, eda_delta
   HR   (1 Hz, 20 samples/window) — derived from PPG:
-    hr_mean, hr_std, hr_min, hr_max
+    hr_mean, hr_std, hr_min, hr_max, hr_delta
   IBI  (irregular; event-based) — derived from PPG:
     ibi_mean, ibi_std, ibi_rmssd, ibi_sdnn, ibi_pnn50,
     ibi_lf_power, ibi_hf_power, ibi_lf_hf_ratio
@@ -236,9 +236,31 @@ def extract_window_features(subj, t_start, t_end):
 
     # TEMP is intentionally excluded: Design 1 does not include a temperature sensor.
 
+    # --- Derivative / transition features ---
+    # EDA rate of change: mean absolute first derivative
+    if len(eda) >= 2:
+        eda_deriv = _mean([abs(eda[i+1] - eda[i]) for i in range(len(eda)-1)])
+    else:
+        eda_deriv = float("nan")
+
+    # EDA delta: mean EDA in second half minus first half (captures rising EDA)
+    if len(eda) >= 4:
+        mid = len(eda) // 2
+        eda_delta = _mean(eda[mid:]) - _mean(eda[:mid])
+    else:
+        eda_delta = float("nan")
+
+    # HR delta: mean HR in second half minus first half (captures rising HR)
+    if len(hr) >= 4:
+        mid_hr = len(hr) // 2
+        hr_delta = _mean(hr[mid_hr:]) - _mean(hr[:mid_hr])
+    else:
+        hr_delta = float("nan")
+
     return [
         eda_mean, eda_std, eda_slope, eda_range, eda_scr,
-        hr_mean, hr_std, hr_min, hr_max,
+        eda_deriv, eda_delta,
+        hr_mean, hr_std, hr_min, hr_max, hr_delta,
         ibi_mean, ibi_std, ibi_rmssd, ibi_sdnn, ibi_pnn50,
         lf_power, hf_power, lf_hf,
         acc_mag_mean, acc_mag_std, acc_var_x, acc_var_y, acc_var_z, acc_mean_jerk,
@@ -247,7 +269,8 @@ def extract_window_features(subj, t_start, t_end):
 
 FEATURE_NAMES = [
     "eda_mean", "eda_std", "eda_slope", "eda_range", "eda_scr_count",
-    "hr_mean", "hr_std", "hr_min", "hr_max",
+    "eda_deriv_mean", "eda_delta",
+    "hr_mean", "hr_std", "hr_min", "hr_max", "hr_delta",
     "ibi_mean", "ibi_std", "ibi_rmssd", "ibi_sdnn", "ibi_pnn50",
     "ibi_lf_power", "ibi_hf_power", "ibi_lf_hf_ratio",
     "acc_mag_mean", "acc_mag_std", "acc_var_x", "acc_var_y", "acc_var_z", "acc_mean_jerk",

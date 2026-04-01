@@ -304,7 +304,15 @@ def main():
     # ------------------------------------------------------------------
     print("\n[4/5] Training XGBoost classifier...")
     t_train_start = time.perf_counter()
-    model, col_means = train_xgboost(X_train, y_train)
+
+    # Build groups list for training subjects (needed for CV threshold tuning)
+    groups_train = []
+    train_set = set(train_subs)
+    for sid in groups:
+        if sid in train_set:
+            groups_train.append(sid)
+
+    model, col_means, threshold = train_xgboost(X_train, y_train, groups_train)
     t_train_end = time.perf_counter()
     print(f"  Training time: {(t_train_end - t_train_start):.2f}s")
 
@@ -312,14 +320,14 @@ def main():
     model_path = os.path.join(output_dir, "model.json")
     meta_path = os.path.join(output_dir, "model_meta.json")
     os.makedirs(output_dir, exist_ok=True)
-    save_model(model, col_means, model_path, meta_path)
+    save_model(model, col_means, model_path, meta_path, threshold)
     print(f"  Model saved: {model_path}")
 
     # ------------------------------------------------------------------
     # 5. Evaluate
     # ------------------------------------------------------------------
     print("\n[5/5] Evaluating on held-out test set...")
-    metrics, preds, probs = evaluate(model, col_means, X_test, y_test)
+    metrics, preds, probs = evaluate(model, col_means, X_test, y_test, threshold)
 
     # Add split metadata to metrics
     metrics["train_subjects"] = train_subs

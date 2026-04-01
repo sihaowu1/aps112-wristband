@@ -44,6 +44,7 @@ app = FastAPI(title="Biofeedback stress inference")
 
 _model = None
 _col_means = None
+_threshold = 0.5
 _profiles = None
 _personalized_model = None
 _personalized_col_means = None
@@ -52,10 +53,10 @@ _personalized_info = None  # dict with matched subject details
 
 @app.on_event("startup")
 def _load_model_on_startup():
-    global _model, _col_means, _profiles
+    global _model, _col_means, _threshold, _profiles
     out_dir = os.environ.get("MODEL_DIR", str(DEFAULT_OUTPUT))
     try:
-        _model, _col_means, _profiles = load_trained_model(out_dir)
+        _model, _col_means, _threshold, _profiles = load_trained_model(out_dir)
     except FileNotFoundError as exc:
         warnings.warn(
             f"Could not load model from {out_dir}: {exc}. "
@@ -517,8 +518,8 @@ def personalize(req: PersonalizeRequest):
                 y_aug.append(label)
             n_boosted += 1
 
-    # 5. Retrain
-    model, col_means = train_xgboost(X_aug, y_aug)
+    # 5. Retrain (no CV threshold tuning for personalized — use base threshold)
+    model, col_means, _ = train_xgboost(X_aug, y_aug)
 
     elapsed = time.perf_counter() - t0
 
@@ -585,6 +586,7 @@ def predict(req: PredictRequest):
         baseline_acc=(req.baseline_acc_x, req.baseline_acc_y, req.baseline_acc_z),
         gender=req.gender,
         activity=req.exercise,
+        threshold=_threshold,
     )
     result["inference_ms"] = round((time.time() - t0) * 1000, 1)
 
