@@ -12,8 +12,10 @@ Runs predict_one() → VIBRATE / DO NOT VIBRATE.
 
 from __future__ import annotations
 
+import csv
 import os
 import sys
+import time
 import warnings
 from pathlib import Path
 
@@ -22,6 +24,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
+from typing import Optional
 
 from src.inference import (
     load_trained_model,
@@ -31,6 +34,7 @@ from src.inference import (
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 DEFAULT_OUTPUT = SCRIPT_DIR / "outputs"
+DEFAULT_DATA = SCRIPT_DIR / "data" / "PhysioNet"
 
 app = FastAPI(title="Biofeedback stress inference")
 
@@ -41,6 +45,9 @@ app = FastAPI(title="Biofeedback stress inference")
 _model = None
 _col_means = None
 _profiles = None
+_personalized_model = None
+_personalized_col_means = None
+_personalized_info = None  # dict with matched subject details
 
 
 @app.on_event("startup")
@@ -67,6 +74,12 @@ def _load_model_on_startup():
 # ---------------------------------------------------------------------------
 # Request schema
 # ---------------------------------------------------------------------------
+
+class PersonalizeRequest(BaseModel):
+    age: int = Field(..., ge=1, le=120)
+    gender: str = Field(..., pattern="^(m|f)$")
+    exercise: str = Field(..., pattern="^(Yes|No)$")
+
 
 class PredictRequest(BaseModel):
     # user profile
@@ -187,6 +200,17 @@ _PAGE = r"""<!DOCTYPE html>
           </select>
         </div>
       </div>
+      <div style="margin-top:1rem;display:flex;align-items:center;gap:1rem;flex-wrap:wrap">
+        <button type="button" id="train-btn"
+          style="background:#7c3aed;color:#fff;border:none;padding:.55rem 1.5rem;
+                 font-size:.9rem;border-radius:8px;cursor:pointer;font-weight:600;
+                 transition:background .15s"
+          onmouseover="this.style.background='#6d28d9'"
+          onmouseout="this.style.background='#7c3aed'">
+          Personalize Model
+        </button>
+        <span id="train-status" style="font-size:.85rem;color:#555"></span>
+      </div>
     </div>
 
     <!-- SECTION B: Baseline (optional) -->
@@ -251,11 +275,6 @@ _PAGE = r"""<!DOCTYPE html>
           <input id="acc_z" name="acc_z" type="number" step="any" required placeholder="e.g. 62"/>
           <span class="hint">6-axis IMU accelerometer (wristband), units 1/64 g</span>
         </div>
-        <div class="field full">
-          <label for="ibi_raw">IBI Values <span style="font-weight:400;color:#777">(optional)</span></label>
-          <input id="ibi_raw" name="ibi_raw" type="text" placeholder="e.g. 0.72, 0.68, 0.75"/>
-          <span class="hint">Comma-separated inter-beat intervals in seconds (derived from PPG). Leave blank to auto-derive from HR.</span>
-        </div>
       </div>
     </div>
 
@@ -273,6 +292,50 @@ _PAGE = r"""<!DOCTYPE html>
   const blFields = document.getElementById('bl-fields');
   blCheck.addEventListener('change', () => {
     blFields.classList.toggle('open', blCheck.checked);
+  });
+
+  // --- Personalize Model button ---
+  document.getElementById('train-btn').addEventListener('click', async () => {
+    const age = document.getElementById('age').value;
+    const gender = document.getElementById('gender').value;
+    const exercise = document.getElementById('exercise').value;
+
+    if (!age || !gender || !exercise) {
+      document.getElementById('train-status').innerHTML =
+        '<span style="color:#e53e3e">Fill in Age, Gender, and Exercise first.</span>';
+      return;
+    }
+
+    const btn = document.getElementById('train-btn');
+    const status = document.getElementById('train-status');
+    btn.disabled = true;
+    btn.textContent = 'Training\u2026';
+    status.innerHTML = '<span style="color:#555">Matching your profile and retraining the model. This may take a minute\u2026</span>';
+
+    try {
+      const r = await fetch('/personalize', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({age: Number(age), gender, exercise}),
+      });
+      const j = await r.json();
+      if (!r.ok) {
+        status.innerHTML = '<span style="color:#e53e3e">Error: ' + (j.detail || JSON.stringify(j)) + '</span>';
+        return;
+      }
+      status.innerHTML =
+        '<span style="color:#38a169;font-weight:600">\u2713 Personalized!</span> ' +
+        '<span style="color:#555">Matched to <b>' + j.matched_subject + '</b> ' +
+        '(age ' + j.matched_age + ', ' + (j.matched_gender === 'm' ? 'male' : 'female') +
+        ', exercise: ' + j.matched_activity + '). ' +
+        j.n_boosted_windows + ' windows boosted ' + j.boost_factor + 'x. ' +
+        'Trained in ' + j.training_time_s + 's.</span>';
+    } catch (err) {
+      status.innerHTML = '<span style="color:#e53e3e">Network error: ' + err.message + '</span>';
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Personalize Model';
+    }
   });
 
   document.getElementById('f').addEventListener('submit', async (e) => {
@@ -309,26 +372,22 @@ _PAGE = r"""<!DOCTYPE html>
       const isVib = j.prediction === 1;
       const cls = isVib ? 'vibrate' : 'no-vibrate';
 
-      let featRows = '';
-      if (j.features) {
-        const entries = Object.entries(j.features);
-        featRows = entries.map(([n,v]) =>
-          '<tr><td>' + n + '</td><td>' + (v !== null ? v : '&mdash;') + '</td></tr>'
-        ).join('');
-      }
+      const personTag = j.personalized
+        ? '<span style="display:inline-block;background:#7c3aed;color:#fff;font-size:.75rem;padding:.15rem .5rem;border-radius:4px;margin-left:.5rem">Personalized' + (j.matched_subject ? ' \u2014 ' + j.matched_subject : '') + '</span>'
+        : '';
 
       resDiv.innerHTML =
         '<div class="card ' + cls + '">' +
           '<div class="result-header">' +
-            '<span class="decision">' + j.label + '</span>' +
+            '<span class="decision">' + j.label + personTag + '</span>' +
             '<span class="prob">P(stress) = ' + j.probability.toFixed(4) + '</span>' +
           '</div>' +
           '<div class="result-meta">' +
             '<span>Age: ' + body.age + '</span>' +
             '<span>Gender: ' + (body.gender === 'm' ? 'Male' : 'Female') + '</span>' +
             '<span>Exercise: ' + body.exercise + '</span>' +
+            '<span>Inference time: ' + j.inference_ms + ' ms</span>' +
           '</div>' +
-          (featRows ? '<table class="feat-table"><thead><tr><th>Feature</th><th>Z-score</th></tr></thead><tbody>' + featRows + '</tbody></table>' : '') +
         '</div>';
       resDiv.style.display = 'block';
     } catch (err) {
@@ -353,9 +412,148 @@ def index():
     return HTMLResponse(_PAGE)
 
 
+# ---------------------------------------------------------------------------
+# Personalization helpers
+# ---------------------------------------------------------------------------
+
+def _load_subject_info(data_dir):
+    """Load subject-info.csv → {subject_id: {gender, age, activity}} dict."""
+    path = os.path.join(data_dir, "subject-info.csv")
+    info = {}
+    if not os.path.exists(path):
+        return info
+    with open(path, newline="") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            sid = row.get("Info ", row.get("Info", "")).strip()
+            if not sid:
+                continue
+            info[sid] = {
+                "gender": row.get("Gender", "").strip().lower(),
+                "age": row.get("Age", "").strip(),
+                "activity": row.get("Does physical activity regularly?", "").strip(),
+            }
+    return info
+
+
+def _find_closest_subject(subject_info, age, gender, exercise):
+    """
+    Score each dataset subject by demographic distance to the user.
+    Returns (subject_id, info_dict, score).
+    """
+    best_sid, best_score, best_info = None, float("inf"), None
+    for sid, info in subject_info.items():
+        score = 0
+        # Gender mismatch: large penalty
+        if info["gender"] != gender:
+            score += 100
+        # Exercise mismatch
+        if info["activity"].lower() != exercise.lower():
+            score += 10
+        # Age distance
+        try:
+            subj_age = int(info["age"])
+            score += abs(subj_age - age)
+        except (ValueError, TypeError):
+            score += 50  # unknown age
+        if score < best_score:
+            best_score = score
+            best_sid = sid
+            best_info = info
+    return best_sid, best_info, best_score
+
+
+@app.post("/personalize")
+def personalize(req: PersonalizeRequest):
+    """
+    Match user demographics to the closest dataset subject and retrain
+    the model with that subject's windows upweighted (duplicated 3x).
+    """
+    global _personalized_model, _personalized_col_means, _personalized_info
+
+    data_dir = os.environ.get("DATA_DIR", str(DEFAULT_DATA))
+    if not os.path.isdir(data_dir):
+        raise HTTPException(status_code=500, detail=f"Data directory not found: {data_dir}")
+
+    # 1. Find closest subject
+    subject_info = _load_subject_info(data_dir)
+    if not subject_info:
+        raise HTTPException(status_code=500, detail="subject-info.csv not found or empty")
+
+    matched_sid, matched_info, match_score = _find_closest_subject(
+        subject_info, req.age, req.gender, req.exercise
+    )
+
+    # 2. Load data and build features
+    from src.data_loader import load_all_stress_subjects
+    from src.features import build_dataset
+    from src.model import train_xgboost
+    from train import subject_split
+
+    t0 = time.perf_counter()
+
+    subjects = load_all_stress_subjects(data_dir, verbose=False)
+    if not subjects:
+        raise HTTPException(status_code=500, detail="No subjects loaded from dataset")
+
+    X, y, groups = build_dataset(subjects, verbose=False)
+    if not X:
+        raise HTTPException(status_code=500, detail="Feature matrix is empty")
+
+    X_train, y_train, _, _, _, train_subs, _ = subject_split(X, y, groups)
+
+    # 3. Rebuild groups for train set (preserving order from subject_split)
+    train_set = set(train_subs)
+    groups_train = [sid for sid in groups if sid in train_set]
+
+    # 4. Augment: duplicate matched subject's windows (boost_factor=3)
+    boost_factor = 3
+    X_aug, y_aug = list(X_train), list(y_train)
+    n_boosted = 0
+    for feats, label, sid in zip(X_train, y_train, groups_train):
+        if sid == matched_sid:
+            for _ in range(boost_factor - 1):
+                X_aug.append(list(feats))
+                y_aug.append(label)
+            n_boosted += 1
+
+    # 5. Retrain
+    model, col_means = train_xgboost(X_aug, y_aug)
+
+    elapsed = time.perf_counter() - t0
+
+    _personalized_model = model
+    _personalized_col_means = col_means
+    _personalized_info = {
+        "matched_subject": matched_sid,
+        "gender": matched_info.get("gender", "?"),
+        "age": matched_info.get("age", "?"),
+        "activity": matched_info.get("activity", "?"),
+        "match_score": match_score,
+        "n_boosted_windows": n_boosted,
+        "boost_factor": boost_factor,
+        "training_time_s": round(elapsed, 2),
+    }
+
+    return {
+        "status": "ok",
+        "matched_subject": matched_sid,
+        "matched_gender": matched_info.get("gender", "?"),
+        "matched_age": matched_info.get("age", "?"),
+        "matched_activity": matched_info.get("activity", "?"),
+        "n_boosted_windows": n_boosted,
+        "boost_factor": boost_factor,
+        "training_time_s": round(elapsed, 2),
+    }
+
+
 @app.post("/predict")
 def predict(req: PredictRequest):
-    if _model is None:
+    # Use personalized model if available, otherwise the base model
+    use_model = _personalized_model if _personalized_model is not None else _model
+    use_col_means = _personalized_col_means if _personalized_col_means is not None else _col_means
+
+    if use_model is None:
         raise HTTPException(
             status_code=503,
             detail="Model not loaded. Run 'python train.py' to generate outputs/model.json.",
@@ -373,9 +571,10 @@ def predict(req: PredictRequest):
                 detail=f"Invalid IBI values — expected comma-separated numbers: {exc}",
             ) from exc
 
+    t0 = time.time()
     result = predict_one(
-        _model,
-        _col_means,
+        use_model,
+        use_col_means,
         profiles,
         eda=req.eda,
         hr=req.hr,
@@ -387,10 +586,14 @@ def predict(req: PredictRequest):
         gender=req.gender,
         activity=req.exercise,
     )
+    result["inference_ms"] = round((time.time() - t0) * 1000, 1)
 
     result["age"] = req.age
     result["gender"] = req.gender
     result["exercise"] = req.exercise
+    result["personalized"] = _personalized_model is not None
+    if _personalized_info:
+        result["matched_subject"] = _personalized_info["matched_subject"]
     return result
 
 

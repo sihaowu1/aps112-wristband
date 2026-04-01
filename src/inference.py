@@ -126,28 +126,37 @@ def _compute_baseline_means(baseline_eda, baseline_hr, baseline_acc):
 def predict_one(model, col_means, profiles,
                 eda, hr, acc_xyz, ibi_vals,
                 baseline_eda, baseline_hr, baseline_acc,
-                gender="m", activity="Yes"):
+                gender="m", activity="Yes", n_mc=30):
     """
     Classify a single point-in-time reading.
+
+    Runs n_mc Monte Carlo samples (each with independent synthesis noise) and
+    averages the probabilities, so P(stress) is stable across repeated calls.
 
     Returns dict with:
       prediction  : 0 or 1
       label       : "VIBRATE" | "DO NOT VIBRATE"
-      probability : float P(stress)
-      features    : {name: z_scored_value}
+      probability : float P(stress)  (mean over n_mc samples)
+      features    : {name: z_scored_value}  (from the first sample)
     """
     b_means = _compute_baseline_means(baseline_eda, baseline_hr, baseline_acc)
     pop_stds = _pop_stds_for_profile(profiles, gender, activity)
 
-    win = synthesize_window(eda, hr, acc_xyz, ibi_vals, noise=0.04)
-    feats = extract_window_features(win, 0, WINDOW_S)
+    all_z_imp = []
+    first_z = None
+    for i in range(n_mc):
+        win = synthesize_window(eda, hr, acc_xyz, ibi_vals, noise=0.04)
+        feats = extract_window_features(win, 0, WINDOW_S)
+        z = [(v - m) / s if not math.isnan(v) else float("nan")
+             for v, m, s in zip(feats, b_means, pop_stds)]
+        z_imp = _apply_means([z], col_means)[0]
+        all_z_imp.append(z_imp)
+        if first_z is None:
+            first_z = z
 
-    z = [(v - m) / s if not math.isnan(v) else float("nan")
-         for v, m, s in zip(feats, b_means, pop_stds)]
-
-    z_imp = _apply_means([z], col_means)[0]
-    d = xgb.DMatrix([z_imp], feature_names=FEATURE_NAMES)
-    prob = float(model.predict(d)[0])
+    d = xgb.DMatrix(all_z_imp, feature_names=FEATURE_NAMES)
+    probs = model.predict(d)
+    prob = float(sum(probs) / len(probs))
     pred = 1 if prob >= 0.5 else 0
 
     return {
@@ -155,7 +164,7 @@ def predict_one(model, col_means, profiles,
         "label": "VIBRATE" if pred == 1 else "DO NOT VIBRATE",
         "probability": round(prob, 4),
         "features": {name: (round(float(zv), 3) if not math.isnan(zv) else None)
-                     for name, zv in zip(FEATURE_NAMES, z)},
+                     for name, zv in zip(FEATURE_NAMES, first_z)},
     }
 
 
