@@ -1,0 +1,38 @@
+METHODS SUMMARY — Portable Biofeedback Wristband Prototype
+============================================================
+
+Dataset
+  Source  : PhysioNet Wearable Device Dataset (Empatica E4)
+  Sessions: STRESS only (aerobic/anaerobic excluded)
+  Subjects: 18 V1 (S01–S18) + 18 V2 (f01–f18)
+
+Label Mapping
+  1 = vibrate    (stress task active)
+  0 = no vibrate (rest / baseline period)
+  V1 stress intervals: tag-pairs [3,4],[5,6],[7,8],[9,10],[11,12]
+  V1 rest intervals  : tag-pairs [2,3],[4,5],[6,7]
+  V2 stress intervals: tag-pairs [2,3],[4,5],[6,7],[8,9]
+  V2 rest intervals  : tag-pairs [1,2],[3,4],[7,8]
+
+Windowing
+  Window : 20 s, Step : 10 s (50% overlap)
+
+Features (21 total)
+  EDA  : mean, std, slope, range
+  HR   : mean, std, min, max
+  IBI  : mean, std, RMSSD, SDNN, pNN50
+  ACC  : mag_mean, mag_std, var_x, var_y, var_z, mean_jerk
+  TEMP : mean, slope
+
+Train/Test Split
+  Strategy : subject-wise 70/30, stratified by protocol version
+  Train subjects (26): S01, S02, S03, S04, S07, S08, S09, S11, S12, S15, S16, S17, S18, f01, f02, f03, f04, f05, f06, f07, f08, f10, f13, f14, f17, f18
+  Test  subjects (10): S05, S06, S10, S13, S14, f09, f11, f12, f15, f16
+
+Model
+  Algorithm    : XGBoost (binary:logistic)
+  Rounds       : 300 boosting rounds
+  Depth        : 6
+  Learning rate: 0.1
+  Imbalance    : scale_pos_weight = n_rest / n_stress
+  NaN handling : column-mean imputation from training set

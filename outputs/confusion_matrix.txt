@@ -1,0 +1,11 @@
+Confusion Matrix — Rows: Actual, Columns: Predicted
+
+              Pred:rest  Pred:stress
+Actual:rest       1036          143
+Actual:stress      112          213
+
+Accuracy    : 0.8305
+Sensitivity : 0.6554
+Specificity : 0.8787
+Precision   : 0.5983
+Proc. time  : 29.07 ms (1504 windows)
