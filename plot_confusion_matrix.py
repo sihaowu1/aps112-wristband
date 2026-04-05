@@ -59,7 +59,7 @@ def main():
             pct = count / n_total * 100
             # Use white text on dark cells, dark text on light cells
             color = "white" if count > n_total * 0.25 else "#1a1a1a"
-            ax.text(j, i, f"{count}\n({pct:.1f}%)",
+            ax.text(j, i, f"{count}",
                     ha="center", va="center", fontsize=14, fontweight="bold",
                     color=color)
 
