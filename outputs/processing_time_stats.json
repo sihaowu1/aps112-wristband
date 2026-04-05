@@ -1,0 +1,9 @@
+{
+  "n_runs": 1000,
+  "n_test_windows": 1504,
+  "mean_ms": 6.5074,
+  "std_ms": 3.794,
+  "min_ms": 0.5619,
+  "max_ms": 38.6302,
+  "per_window_mean_ms": 0.004327
+}

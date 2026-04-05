@@ -215,6 +215,22 @@ Set `MODEL_DIR` if the model lives outside `./outputs`.
 
 ---
 
+## Processing Time Benchmark
+
+To measure inference time with statistical confidence, run:
+
+```bash
+python benchmark_time.py              # 1000 runs (default)
+python benchmark_time.py --runs 5000  # more runs for tighter estimates
+```
+
+This loads the trained model and test set, runs inference repeatedly, and saves
+`outputs/processing_time_stats.json` with mean, standard deviation, min, and max
+processing times across all runs. A 5-iteration warmup is performed before timing
+to exclude JIT/cache effects.
+
+---
+
 ## Outputs
 
 All files are written to `outputs/` (created automatically):
@@ -228,6 +244,7 @@ All files are written to `outputs/` (created automatically):
 | `predictions.csv` | Per-window predictions on held-out test set |
 | `confusion_matrix.txt` | Human-readable confusion matrix |
 | `methods_summary.txt` | Concise methods description |
+| `processing_time_stats.json` | Inference time mean, std, min, max over many runs |
 
 ---
 
