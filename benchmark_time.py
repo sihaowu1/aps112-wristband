@@ -86,6 +86,7 @@ def main():
         "min_ms": round(min_ms, 4),
         "max_ms": round(max_ms, 4),
         "per_window_mean_ms": round(per_window_ms, 6),
+        "raw_times_ms": [round(t, 4) for t in times_ms],
     }
 
     out_path = os.path.join(args.output_dir, "processing_time_stats.json")

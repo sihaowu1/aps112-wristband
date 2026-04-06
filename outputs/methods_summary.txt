@@ -1,10 +1,10 @@
-METHODS SUMMARY â€” Portable Biofeedback Wristband Prototype
+METHODS SUMMARY — Portable Biofeedback Wristband Prototype
 ============================================================
 
 Dataset
   Source  : PhysioNet Wearable Device Dataset (Empatica E4)
   Sessions: STRESS only (aerobic/anaerobic excluded)
-  Subjects: 18 V1 (S01â€“S18) + 18 V2 (f01â€“f18)
+  Subjects: 18 V1 (S01–S18) + 18 V2 (f01–f18)
 
 Label Mapping
   1 = vibrate    (stress task active)
